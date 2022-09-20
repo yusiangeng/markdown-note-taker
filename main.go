@@ -1,10 +1,15 @@
 package main
 
 import (
+	"fmt"
+	"io/ioutil"
+	"strings"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -17,10 +22,12 @@ type Config struct {
 
 var cfg Config
 
+const windowTitle = "Markdown Note Taker"
+
 func main() {
 	a := app.New()
 
-	win := a.NewWindow("Markdown Note Taker")
+	win := a.NewWindow(windowTitle)
 
 	edit, preview := cfg.makeUi()
 	cfg.createMenuItems(win)
@@ -48,7 +55,7 @@ func (app *Config) makeUi() (*widget.Entry, *widget.RichText) {
 }
 
 func (app *Config) createMenuItems(win fyne.Window) {
-	openMenuItem := fyne.NewMenuItem("Open...", func() {})
+	openMenuItem := fyne.NewMenuItem("Open...", app.openFunc(win))
 
 	saveMenuItem := fyne.NewMenuItem("Save", func() {})
 	app.SaveMenuItem = saveMenuItem
@@ -61,6 +68,41 @@ func (app *Config) createMenuItems(win fyne.Window) {
 	menu := fyne.NewMainMenu(fileMenu)
 
 	win.SetMainMenu(menu)
+}
+
+var mdFileFilter = storage.NewExtensionFileFilter([]string{".md", ".MD"})
+
+func (app *Config) openFunc(win fyne.Window) func() {
+	return func() {
+		openDialog := dialog.NewFileOpen(func(read fyne.URIReadCloser, err error) {
+			if err != nil {
+				dialog.ShowError(err, win)
+				return
+			}
+
+			// handle cancel button
+			if read == nil {
+				return
+			}
+
+			defer read.Close()
+
+			data, err := ioutil.ReadAll(read)
+			if err != nil {
+				dialog.ShowError(err, win)
+				return
+			}
+
+			app.EditWidget.SetText(string(data))
+
+			app.CurrentFile = read.URI()
+			win.SetTitle(fmt.Sprintf("%s - %s", windowTitle, read.URI().Name()))
+			app.SaveMenuItem.Disabled = false
+		}, win)
+
+		openDialog.SetFilter(mdFileFilter)
+		openDialog.Show()
+	}
 }
 
 func (app *Config) saveAsFunc(win fyne.Window) func() {
@@ -76,16 +118,24 @@ func (app *Config) saveAsFunc(win fyne.Window) func() {
 				return
 			}
 
+			// check filename ends in ".md"
+			if !strings.HasSuffix(strings.ToLower(write.URI().String()), ".md") {
+				dialog.ShowInformation("Error", "File has to have .md extension", win)
+				return
+			}
+
 			// save file
 			write.Write([]byte(app.EditWidget.Text))
 			app.CurrentFile = write.URI()
 
 			defer write.Close()
 
-			win.SetTitle(win.Title() + " - " + write.URI().Name())
+			win.SetTitle(fmt.Sprintf("%s - %s", windowTitle, write.URI().Name()))
 			app.SaveMenuItem.Disabled = false
 		}, win)
 
+		saveDialog.SetFileName("untitled.md")
+		saveDialog.SetFilter(mdFileFilter)
 		saveDialog.Show()
 	}
 }
